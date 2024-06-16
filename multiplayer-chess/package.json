@@ -1,5 +1,5 @@
 {
-  "name": "chess-game",
+  "name": "multiplayer-chess",
   "private": true,
   "scripts": {
     "build": "turbo build",
@@ -12,12 +12,8 @@
     "turbo": "^2.0.4",
     "typescript": "^5.4.5"
   },
+  "packageManager": "pnpm@8.15.6",
   "engines": {
     "node": ">=18"
-  },
-  "packageManager": "npm@9.8.1",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ]
+  }
 }
