@@ -1,9 +1,34 @@
 import { WebSocket } from "ws";
-import { Chess } from 'chess.js'
+import { Chess, Square } from 'chess.js'
 import { GAME_OVER, INIT_GAME, MOVE } from "./messages";
 import { db } from "./db";
 import { randomUUID } from "crypto";
 import { SocketManager, User } from "./SocketManager";
+
+export function isPromoting(chess: Chess, from: Square, to: Square) {
+    if (!from) {
+        return false;
+    }
+
+    const piece = chess.get(from);
+  
+    if (piece?.type !== "p") {
+      return false;
+    }
+  
+    if (piece.color !== chess.turn()) {
+      return false;
+    }
+  
+    if (!["1", "8"].some((it) => to.endsWith(it))) {
+      return false;
+    }
+  
+    return chess
+      .moves({ square: from, verbose: true })
+      .map((it) => it.to)
+      .includes(to);
+}
 
 export class Game {
     public gameId: string;
@@ -12,6 +37,7 @@ export class Game {
     public board: Chess
     private startTime: Date;
     private moveCount = 0;
+    private timer: NodeJS.Timeout | null = null;
 
     constructor(player1UserId: string, player2UserId: string | null) {
         this.player1UserId = player1UserId;
@@ -50,6 +76,8 @@ export class Game {
             }
         }));
     }
+
+    
 
     async createGameInDb() {
         const game = await db.game.create({
@@ -106,8 +134,8 @@ export class Game {
     }
 
     async makeMove(user: User, move: {
-        from: string;
-        to: string;
+        from: Square;
+        to: Square;
     }) {
         // validate the type of move using zod
         if (this.moveCount % 2 === 0 && user.userId !== this.player1UserId) {
@@ -118,7 +146,18 @@ export class Game {
         }
 
         try {
-            this.board.move(move);
+            if (isPromoting(this.board, move.from, move.to))  {
+                this.board.move({
+                    from: move.from,
+                    to: move.to,
+                    promotion: 'q'
+                });
+            } else {
+                this.board.move({
+                    from: move.from,
+                    to: move.to,
+                });
+            }
         } catch (e) {
             return;
         }
@@ -151,5 +190,26 @@ export class Game {
         }
 
         this.moveCount++;
+    }
+            
+    async endGame() {
+        SocketManager.getInstance().broadcast(this.gameId, JSON.stringify({ type: GAME_OVER }))
+        await db.game.update({
+            data: {
+                status: "ABANDONED",
+                result: this.board.turn() === "b" ? "WHITE_WINS" : "BLACK_WINS"
+            },
+            where: {
+                id: this.gameId
+            }
+        })
+    }
+
+    setTimer(timer: NodeJS.Timeout) {
+        this.timer = timer;
+    }
+
+    clearTimer(){
+        if (this.timer) clearTimeout(this.timer);
     }
 }
