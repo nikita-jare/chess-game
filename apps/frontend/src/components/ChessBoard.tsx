@@ -1,6 +1,6 @@
-import { Chess, Color, Move, PieceSymbol, Square } from 'chess.js';
-import { MouseEvent, memo, useEffect, useState } from 'react';
-import { MOVE } from '../screens/Game';
+import { Chess, Color, PieceSymbol, Square } from 'chess.js';
+import { MouseEvent, useEffect, useState } from 'react';
+import { IMove, MOVE } from '../screens/Game';
 import LetterNotation from './chess-board/LetterNotation';
 import LegalMoveIndicator from './chess-board/LegalMoveIndicator';
 import ChessSquare from './chess-board/ChessSquare';
@@ -8,16 +8,8 @@ import NumberNotation from './chess-board/NumberNotation';
 import { drawArrow } from '../utils/canvas';
 import useWindowSize from '../hooks/useWindowSize';
 import Confetti from 'react-confetti';
-import MoveSound from '/move.wav';
-import CaptureSound from '/capture.wav';
-
-import { useRecoilState } from 'recoil';
-
-import {
-  isBoardFlippedAtom,
-  movesAtom,
-  userSelectedMoveIndexAtom,
-} from '@repo/store/chessBoard';
+import MoveSound from '../../public/move.wav';
+import CaptureSound from '../../public/capture.wav';
 
 export function isPromoting(chess: Chess, from: Square, to: Square) {
   if (!from) {
@@ -39,12 +31,12 @@ export function isPromoting(chess: Chess, from: Square, to: Square) {
   }
 
   return chess
-    .history({ verbose: true })
+    .moves({ square: from, verbose: true })
     .map((it) => it.to)
     .includes(to);
 }
 
-export const ChessBoard = memo(({
+export const ChessBoard = ({
   gameId,
   started,
   myColor,
@@ -52,11 +44,15 @@ export const ChessBoard = memo(({
   board,
   socket,
   setBoard,
+  setMoves,
+  moves,
 }: {
   myColor: Color;
   gameId: string;
   started: boolean;
   chess: Chess;
+  moves: IMove[];
+  setMoves: React.Dispatch<React.SetStateAction<IMove[]>>;
   setBoard: React.Dispatch<
     React.SetStateAction<
       ({
@@ -73,16 +69,11 @@ export const ChessBoard = memo(({
   } | null)[][];
   socket: WebSocket;
 }) => {
-  console.log("chessboard reloaded")
-
-  const [isFlipped, setIsFlipped] = useRecoilState(isBoardFlippedAtom);
-  const [userSelectedMoveIndex, setUserSelectedMoveIndex] = useRecoilState(
-    userSelectedMoveIndexAtom,
-  );
-  const [moves, setMoves] = useRecoilState(movesAtom);
-  const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(
-    null,
-  );
+  const { height, width } = useWindowSize();
+  const [lastMoveFrom, lastMoveTo] = [
+    moves?.at(-1)?.from || '',
+    moves?.at(-1)?.to || '',
+  ];
   const [rightClickedSquares, setRightClickedSquares] = useState<string[]>([]);
   const [arrowStart, setArrowStart] = useState<string | null>(null);
 
@@ -91,8 +82,13 @@ export const ChessBoard = memo(({
   const [legalMoves, setLegalMoves] = useState<string[]>([]);
 
   const labels = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const isFlipped = myColor === 'b';
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
-  const boxSize = 80;
+  const OFFSET = 100;
+  const boxSize =
+    width > height
+      ? Math.floor((height - OFFSET) / 8)
+      : Math.floor((width - OFFSET) / 8);
   const [gameOver, setGameOver] = useState(false);
   const moveAudio = new Audio(MoveSound);
   const captureAudio = new Audio(CaptureSound);
@@ -106,12 +102,6 @@ export const ChessBoard = memo(({
       setArrowStart(squareRep);
     }
   };
-
-  useEffect(() => {
-    if (myColor === 'b') {
-      setIsFlipped(true);
-    }
-  }, [myColor]);
 
   const clearCanvas = () => {
     setRightClickedSquares([]);
@@ -135,13 +125,7 @@ export const ChessBoard = memo(({
       if (canvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          drawArrow({
-            ctx,
-            start: arrowStart,
-            end: stoppedAtSquare,
-            isFlipped,
-            squareSize: boxSize,
-          });
+          drawArrow(ctx, arrowStart, stoppedAtSquare, isFlipped);
         }
       }
       setArrowStart(null);
@@ -166,76 +150,36 @@ export const ChessBoard = memo(({
 
   useEffect(() => {
     clearCanvas();
-    const lMove = moves.at(-1);
-    if (lMove) {
-      setLastMove({
-        from: lMove.from,
-        to: lMove.to,
-      });
-    } else {
-      setLastMove(null);
-    }
-  }, [moves]);
-
-  useEffect(() => {
-    if (userSelectedMoveIndex !== null) {
-      const move = moves[userSelectedMoveIndex];
-      setLastMove({
-        from: move.from,
-        to: move.to,
-      });
-      chess.load(move.after);
-      setBoard(chess.board());
-      return;
-    }
-  }, [userSelectedMoveIndex]);
-
-  useEffect(() => {
-    if (userSelectedMoveIndex !== null) {
-      chess.reset();
-      moves.forEach((move) => {
-        chess.move({ from: move.from, to: move.to });
-      });
-      setBoard(chess.board());
-      setUserSelectedMoveIndex(null);
-    } else {
-      setBoard(chess.board());
-    }
   }, [moves]);
 
   return (
     <>
       {gameOver && <Confetti />}
       <div className="flex relative">
-        <div className="text-white-200 rounded-md overflow-hidden">
+        <div className="text-white-200 mr-10 rounded-md overflow-hidden">
           {(isFlipped ? board.slice().reverse() : board).map((row, i) => {
             i = isFlipped ? i + 1 : 8 - i;
             return (
               <div key={i} className="flex relative">
                 <NumberNotation
-                  isMainBoxColor={isFlipped ? i % 2 !== 0 : i % 2 === 0}
+                  isMainBoxColor={i % 2 === 0}
                   label={i.toString()}
                 />
                 {(isFlipped ? row.slice().reverse() : row).map((square, j) => {
                   j = isFlipped ? 7 - (j % 8) : j % 8;
 
-                  const isMainBoxColor = (i + j) % 2 !== 0;
-                  const isPiece: boolean = !!square;
+                  const isMainBoxColor = isFlipped
+                    ? (i + j) % 2 === 0
+                    : (i + j) % 2 !== 0;
                   const squareRepresentation = (String.fromCharCode(97 + j) +
                     '' +
                     i) as Square;
                   const isHighlightedSquare =
                     from === squareRepresentation ||
-                    squareRepresentation === lastMove?.from ||
-                    squareRepresentation === lastMove?.to;
+                    squareRepresentation === lastMoveFrom ||
+                    squareRepresentation === lastMoveTo;
                   const isRightClickedSquare =
                     rightClickedSquares.includes(squareRepresentation);
-
-                  const piece = square && square.type;
-                  const isKingInCheckSquare =
-                    piece === 'k' &&
-                    square?.color === chess.turn() &&
-                    chess.inCheck();
 
                   return (
                     <div
@@ -243,49 +187,31 @@ export const ChessBoard = memo(({
                         if (!started) {
                           return;
                         }
-                        if (userSelectedMoveIndex !== null) {
-                          chess.reset();
-                          moves.forEach((move) => {
-                            chess.move({ from: move.from, to: move.to });
-                          });
-                          setBoard(chess.board());
-                          setUserSelectedMoveIndex(null);
-                          return;
-                        }
                         if (!from && square?.color !== chess.turn()) return;
                         if (!isMyTurn) return;
-                        if (from != squareRepresentation) {
-                          setFrom(squareRepresentation);
-                          if (isPiece) {
-                            setLegalMoves(
-                              chess
-                                .moves({
-                                  verbose: true,
-                                  square: square?.square,
-                                })
-                                .map((move) => move.to),
-                            );
-                          }
-                        } else {
+
+                        if (from === squareRepresentation) {
                           setFrom(null);
-                        }
-                        if (!isPiece) {
-                          setLegalMoves([]);
+                        } else {
+                          setFrom(squareRepresentation);
+
+                          setLegalMoves(
+                            chess
+                              .moves({ verbose: true, square: square?.square })
+                              .map((move) => move.to),
+                          );
                         }
 
                         if (!from) {
                           setFrom(squareRepresentation);
                           setLegalMoves(
                             chess
-                              .moves({
-                                verbose: true,
-                                square: square?.square,
-                              })
+                              .moves({ verbose: true, square: square?.square })
                               .map((move) => move.to),
                           );
                         } else {
                           try {
-                            let moveResult: Move;
+                            let moveResult;
                             if (
                               isPromoting(chess, from, squareRepresentation)
                             ) {
@@ -306,25 +232,36 @@ export const ChessBoard = memo(({
                               if (moveResult?.captured) {
                                 captureAudio.play();
                               }
-                              setMoves((prev) => [...prev, moveResult]);
-                              setFrom(null);
-                              setLegalMoves([]);
+
                               if (moveResult.san.includes('#')) {
                                 setGameOver(true);
                               }
-                              socket.send(
-                                JSON.stringify({
-                                  type: MOVE,
-                                  payload: {
-                                    gameId,
-                                    move: moveResult,
-                                  },
-                                }),
-                              );
                             }
-                          } catch (e) {
-                            console.log('e', e);
-                          }
+                            socket.send(
+                              JSON.stringify({
+                                type: MOVE,
+                                payload: {
+                                  gameId,
+                                  move: {
+                                    from,
+                                    to: squareRepresentation,
+                                  },
+                                },
+                              }),
+                            );
+                            setFrom(null);
+                            setLegalMoves([]);
+                            setBoard(chess.board());
+                            console.log({
+                              from,
+                              to: squareRepresentation,
+                            });
+                            const piece=chess.get(squareRepresentation)?.type
+                            setMoves((moves) => [
+                              ...moves,
+                              { from, to: squareRepresentation,piece },
+                            ]);
+                          } catch (e) {}
                         }
                       }}
                       style={{
@@ -332,7 +269,7 @@ export const ChessBoard = memo(({
                         height: boxSize,
                       }}
                       key={j}
-                      className={`${isRightClickedSquare ? (isMainBoxColor ? 'bg-[#CF664E]' : 'bg-[#E87764]') : isKingInCheckSquare ? 'bg-[#FF6347]' : isHighlightedSquare ? `${isMainBoxColor ? 'bg-[#BBCB45]' : 'bg-[#F4F687]'}` : isMainBoxColor ? 'bg-boardDark' : 'bg-boardLight'} ${''}`}
+                      className={`${isRightClickedSquare ? (isMainBoxColor ? 'bg-[#CF664E]' : 'bg-[#E87764]') : isHighlightedSquare ? `${isMainBoxColor ? 'bg-[#BBCB45]' : 'bg-[#F4F687]'}` : isMainBoxColor ? 'bg-[#739552]' : 'bg-[#EBEDD0]'} ${''}`}
                       onContextMenu={(e) => {
                         e.preventDefault();
                       }}
@@ -349,7 +286,7 @@ export const ChessBoard = memo(({
                           ? i === 8 && (
                               <LetterNotation
                                 label={labels[j]}
-                                isMainBoxColor={j % 2 === 0}
+                                isMainBoxColor={j % 2 !== 0}
                               />
                             )
                           : i === 1 && (
@@ -393,4 +330,4 @@ export const ChessBoard = memo(({
       </div>
     </>
   );
-});
+};

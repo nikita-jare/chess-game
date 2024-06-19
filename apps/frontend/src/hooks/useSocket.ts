@@ -8,7 +8,6 @@ export const useSocket = () => {
   const user = useUser();
 
   useEffect(() => {
-    if (!user) return;
     const ws = new WebSocket(`${WS_URL}?token=${user.token}`);
 
     ws.onopen = () => {

@@ -1,4 +1,4 @@
-import { Chess, Move, Square } from 'chess.js';
+import { Chess, Square } from 'chess.js';
 import {
   GAME_ENDED,
   INIT_GAME,
@@ -6,7 +6,7 @@ import {
 } from './messages';
 import { db } from './db';
 import { randomUUID } from 'crypto';
-import { socketManager, User } from './SocketManager';
+import { SocketManager, User } from './SocketManager';
 
 type GAME_STATUS = 'IN_PROGRESS' | 'COMPLETED' | 'ABANDONED' | 'TIME_UP';
 type GAME_RESULT = "WHITE_WINS" | "BLACK_WINS" | "DRAW";
@@ -70,10 +70,11 @@ export class Game {
     from: string;
     to: string;
     comments: string | null;
+    startFen: string;
+    endFen: string;
     timeTaken: number | null;
     createdAt: Date;
   }[]) {
-    console.log(moves);
     moves.forEach((move) => {
       if (
         isPromoting(this.board, move.from as Square, move.to as Square)
@@ -91,9 +92,7 @@ export class Game {
       }
     });
     this.moveCount = moves.length;
-    if (moves[moves.length - 1]) {
-      this.lastMoveTime = moves[moves.length - 1].createdAt;
-    }
+    this.lastMoveTime = moves[moves.length - 1].createdAt;
 
     moves.map((move, index) => {
       if (move.timeTaken) {
@@ -125,7 +124,7 @@ export class Game {
       return;
     }
 
-    socketManager.broadcast(
+    SocketManager.getInstance().broadcast(
       this.gameId,
       JSON.stringify({
         type: INIT_GAME,
@@ -176,8 +175,7 @@ export class Game {
     this.gameId = game.id;
   }
 
-  async addMoveToDb(move: Move, moveTimestamp: Date) {
-    
+  async addMoveToDb(move: { from: string; to: string }, moveTimestamp: Date) {
     await db.$transaction([
       db.move.create({
         data: {
@@ -185,16 +183,16 @@ export class Game {
           moveNumber: this.moveCount + 1,
           from: move.from,
           to: move.to,
-          before: move.before,
-          after: move.after,
+          // Todo: Fix start fen
+          startFen: this.board.fen(),
+          endFen: this.board.fen(),
           createdAt: moveTimestamp,
           timeTaken: moveTimestamp.getTime() - this.lastMoveTime.getTime(),
-          san: move.san
         },
       }),
       db.game.update({
         data: {
-          currentFen: move.after,
+          currentFen: this.board.fen(),
         },
         where: {
           id: this.gameId,
@@ -205,9 +203,11 @@ export class Game {
 
   async makeMove(
     user: User,
-    move: Move
+    move: {
+      from: Square;
+      to: Square;
+    },
   ) {
-    
     // validate the type of move using zod
     if (this.board.turn() === 'w' && user.userId !== this.player1UserId) {
       return;
@@ -257,7 +257,7 @@ export class Game {
 
     this.lastMoveTime = moveTimestamp;
 
-    socketManager.broadcast(
+    SocketManager.getInstance().broadcast(
       this.gameId,
       JSON.stringify({
         type: MOVE,
@@ -314,7 +314,7 @@ export class Game {
   }
 
   async endGame(status: GAME_STATUS, result: GAME_RESULT) {
-    const updatedGame = await db.game.update({
+    await db.game.update({
       data: {
         status,
         result: result,
@@ -322,43 +322,18 @@ export class Game {
       where: {
         id: this.gameId,
       },
-      include: {
-        moves: {
-          orderBy: {
-            moveNumber: 'asc',
-          },
-        },
-        blackPlayer: true,
-        whitePlayer: true,
-      }
     });
 
-    socketManager.broadcast(
+    SocketManager.getInstance().broadcast(
       this.gameId,
       JSON.stringify({
         type: GAME_ENDED,
         payload: {
           result,
-          status,
-          moves: updatedGame.moves,
-          blackPlayer: {
-            id: updatedGame.blackPlayer.id,
-            name: updatedGame.blackPlayer.name,
-          },
-          whitePlayer: {
-            id: updatedGame.whitePlayer.id,
-            name: updatedGame.whitePlayer.name,
-          },
+          status
         },
       }),
     );
-    // clear timers
-    this.clearTimer();
-    this.clearMoveTimer();
-  }
-
-  clearMoveTimer() {
-    if(this.moveTimer) clearTimeout(this.moveTimer);
   }
 
   setTimer(timer: NodeJS.Timeout) {

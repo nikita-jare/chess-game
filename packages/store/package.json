@@ -4,8 +4,7 @@
   "description": "",
   "main": "index.js",
   "exports": {
-    "./useUser": "./src/hooks/useUser.ts",
-    "./chessBoard":"./src/atoms/chessBoard.ts"
+    "./useUser": "./src/hooks/useUser.ts"
   },
   "keywords": [],
   "author": "",

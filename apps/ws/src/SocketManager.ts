@@ -13,7 +13,7 @@ export class User {
   }
 }
 
-class SocketManager {
+export class SocketManager {
   private static instance: SocketManager;
   private interestedSockets: Map<string, User[]>;
   private userRoomMappping: Map<string, string>;
@@ -24,12 +24,12 @@ class SocketManager {
   }
 
   static getInstance() {
-    if (SocketManager.instance) {
-      return SocketManager.instance;
+    if (this.instance) {
+      return this.instance;
     }
 
-    SocketManager.instance = new SocketManager();
-    return SocketManager.instance;
+    this.instance = new SocketManager();
+    return this.instance;
   }
 
   addUser(user: User, roomId: string) {
@@ -37,7 +37,7 @@ class SocketManager {
       ...(this.interestedSockets.get(roomId) || []),
       user,
     ]);
-    this.userRoomMappping.set(user.userId, roomId);
+    this.userRoomMappping.set(user.id, roomId);
   }
 
   broadcast(roomId: string, message: string) {
@@ -53,24 +53,19 @@ class SocketManager {
   }
 
   removeUser(user: User) {
-    const roomId = this.userRoomMappping.get(user.userId);
+    const roomId = this.userRoomMappping.get(user.id);
     if (!roomId) {
       console.error('User was not interested in any room?');
       return;
     }
-    const room = this.interestedSockets.get(roomId) || []
-    const remainingUsers = room.filter(u =>
-      u.userId !== user.userId
-    )
     this.interestedSockets.set(
       roomId,
-      remainingUsers
+      (this.interestedSockets.get(roomId) || []).filter((u) => u !== user),
     );
     if (this.interestedSockets.get(roomId)?.length === 0) {
       this.interestedSockets.delete(roomId);
     }
-    this.userRoomMappping.delete(user.userId);
+
+    this.userRoomMappping.delete(user.id);
   }
 }
-
-export const socketManager = SocketManager.getInstance()
